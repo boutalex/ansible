@@ -1,0 +1,122 @@
+---
+- name: Déploiement de l'application todolist Django
+  hosts: my_infra
+  become: true
+  vars:
+    app_user: admin
+    app_dir: /home/admin/todolist
+    venv_dir: /home/admin/todolist/venv
+
+  tasks:
+
+    - name: Installation des dépendances système
+      ansible.builtin.apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-venv
+          - git
+        state: present
+
+    - name: Mise à jour du cache APT
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Création du répertoire de l'application
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0755"
+
+    - name: Clone the repository
+      ansible.builtin.git:
+        repo: https://github.com/gaeldb/to-do-list.git
+        dest: /home/admin/todolist
+        version: main  # ou master selon le repo
+        force: yes
+
+    - name: Création de l'environnement virtuel Python
+      ansible.builtin.command:
+        cmd: python3 -m venv {{ venv_dir }}
+        creates: "{{ venv_dir }}"
+
+    - name: Installation des dépendances Python
+      ansible.builtin.pip:
+        name:
+          - django
+          - gunicorn
+        virtualenv: "{{ venv_dir }}"
+
+    - name: Migrations de la base SQLite
+      ansible.builtin.command:
+        cmd: "{{ venv_dir }}/bin/python manage.py migrate"
+        chdir: "{{ app_dir }}"
+
+    - name: Configure Django DEBUG mode
+      ansible.builtin.lineinfile:
+        path: /home/admin/todolist/todolist/settings.py
+        regexp: '^DEBUG\s*='
+        line: "DEBUG = {{ django_debug }}"
+      become_user: admin
+
+
+    - name: Ensure production security settings
+      ansible.builtin.lineinfile:
+        path: /home/admin/todolist/todolist/settings.py
+        regexp: '^ALLOWED_HOSTS\s*='
+        line: "ALLOWED_HOSTS = ['192.168.56.20']"
+      when: not django_debug
+      become_user: admin
+          WorkingDirectory=/home/admin/app
+          ExecStart=/home/admin/app/venv/bin/gunicorn todolist.wsgi:application --bind 0.0.0.0:8000
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Recharger systemd
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
+    - name: Activer et démarrer todolist au boot
+      ansible.builtin.systemd:
+        name: todolist
+        enabled: yes
+        state: started
+
+
+
+    - name: Vérifier que l'application est accessible via HTTP
+      ansible.builtin.uri:
+        url: "http://192.168.56.20:8000/"
+        method: GET
+        status_code: 200
+        timeout: 5
+      register: url_check
+      retries: 5
+      delay: 3
+      until: url_check.status == 200
+
+
+    - name: Redémarrer l'application Django
+      ansible.builtin.systemd:
+        name: todolist
+        state: restarted
+
+    - name: Déployer le service systemd todolist
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/todolist.service
+        content: |
+          [Unit]
+          Description=Django Todolist Gunicorn Service
+          After=network.target
+
+          [Service]
+          User=admin
+          Group=admin
