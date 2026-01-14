@@ -1,6 +1,6 @@
 all:
   hosts:
-    test:
-      ansible_host: 192.168.56.10   # IP de la VM de test
-      ansible_user: admin            # utilisateur admin (déjà sudo NOPASSWD)
+    test:                       # nom logique de la VM de test
+      ansible_host: 192.168.56.10  # IP de app-dev
+      ansible_user: admin           # utilisateur à utiliser
       ansible_ssh_private_key_file: /var/lib/jenkins/.ssh/id_rsa_ansible
